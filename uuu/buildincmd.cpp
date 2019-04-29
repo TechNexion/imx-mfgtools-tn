@@ -320,7 +320,12 @@ static constexpr BuiltInScriptRawData g_builtin_cmd[] =
 	{
 		"emmc_all",
 #include "emmc_burn_all.clst"
-		,"burn whole image to eMMC"
+		,"burn whole image to eMMC and boot loader to eMMC boot area"
+	},
+	{
+		"emmc_img",
+#include "emmc_burn_img.clst"
+		,"burn whole image to eMMC user data area"
 	},
 	{
 		"fat_write",
