@@ -313,6 +313,16 @@ static std::string str_to_upper(const std::string &str)
 static constexpr BuiltInScriptRawData g_builtin_cmd[] =
 {
 	{
+		"emmc_imx6_img",
+#include "emmc_burn_imx6_img.clst"
+		,"burn system image to eMMC for iMX6DL and iMX6Q CPUs"
+	},
+	{
+		"emmc_imx7_img",
+#include "emmc_burn_imx7_img.clst"
+		,"burn system image to eMMC for iMX7D CPU"
+	},
+	{
 		"emmc",
 #include "emmc_burn_loader.clst"
 		,"burn boot loader to eMMC boot partition"
