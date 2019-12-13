@@ -27,6 +27,8 @@ set(LSTS
 	emmc_burn_loader.lst
 	emmc_burn_all.lst
 	emmc_burn_img.lst
+	emmc_burn_imx6_img.lst
+	emmc_burn_imx7_img.lst
 	fat_write.lst
 	qspi_burn_loader.lst
 	sd_burn_loader.lst
