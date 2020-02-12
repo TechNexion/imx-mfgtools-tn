@@ -34,6 +34,11 @@
 BuildCmd g_buildin_cmd[] =
 {
 	{
+		"emmc_imx6ul_img",
+#include "emmc_burn_imx6ul_img.clst"
+		,"burn system image to eMMC for iMX6UL and iMX6ULL CPUs"
+	},
+	{
 		"emmc_imx6_img",
 #include "emmc_burn_imx6_img.clst"
 		,"burn system image to eMMC for iMX6DL and iMX6Q CPUs"
