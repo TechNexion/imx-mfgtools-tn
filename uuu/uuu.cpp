@@ -44,6 +44,8 @@
 #include <string.h>
 #include <signal.h>
 #include "buildincmd.h"
+#include <string>
+#include <streambuf>
 
 #include "../libuuu/libuuu.h"
 
@@ -78,6 +80,7 @@ char g_sample_cmd_list[] = {
 vector<string> g_usb_path_filter;
 
 int g_verbose = 0;
+static bool g_start_usb_transfer;
 
 class AutoCursor
 {
@@ -129,11 +132,15 @@ void print_help(bool detail = false)
 		"                example: SDPS: boot -f flash.bin\n"
 		"    -d          Daemon mode, wait for forever.\n"
 		"    -v -V       verbose mode, -V enable libusb error\\warning info\n"
+		"    -dry	 Dry run mode, check if script or cmd correct \n"
 		"    -m          USBPATH Only monitor these paths.\n"
 		"                    -m 1:2 -m 1:3\n\n"
+		"    -t          Timeout second for wait known usb device appeared\n"
+		"    -pp         usb polling period in milliseconds\n"
 		"uuu -s          Enter shell mode. uuu.inputlog record all input commands\n"
 		"                you can use \"uuu uuu.inputlog\" next time to run all commands\n\n"
 		"uuu -udev       linux: show udev rule to avoid sudo each time \n"
+		"uuu -lsusb      List connected know devices\n"
 		"uuu -h -H       show help, -H means detail helps\n\n";
 	printf("%s", help);
 	printf("uuu [-d -m -v] -b[run] ");
@@ -217,7 +224,16 @@ string build_process_bar(size_t width, size_t pos, size_t total)
 	str[width - 1] = ']';
 
 	if (total == 0)
+	{
+		if (pos == 0)
+			return str;
+
+		string_ex loc;
+		size_t s = pos / (1024 * 1024);
+		loc.format("%dM", s);
+		str.replace(1, loc.size(), loc);
 		return str;
+	}
 
 	size_t i;
 
@@ -237,7 +253,7 @@ string build_process_bar(size_t width, size_t pos, size_t total)
 
 	string_ex per;
 	per.format("%d%%", pos * 100 / total);
-
+	
 	size_t start = (width - per.size()) / 2;
 	str.replace(start, per.size(), per);
 	str.insert(start, g_vt_yellow);
@@ -277,6 +293,9 @@ public:
 	size_t m_start_pos;
 	size_t	m_trans_size;
 	clock_t m_start_time;
+	uint64_t m_cmd_start_time;
+	uint64_t m_cmd_end_time;
+	bool m_IsEmptyLine;
 
 	ShowNotify()
 	{
@@ -286,6 +305,7 @@ public:
 		m_cmd_index = 0;
 		m_done = 0;
 		m_start_pos = 0;
+		m_IsEmptyLine = false;
 		m_start_time = clock();
 	}
 
@@ -301,8 +321,27 @@ public:
 		{
 			m_start_pos = 0;
 			m_cmd = nt.str;
+			m_cmd_start_time = nt.timestamp;
 		}
-		if (nt.type == uuu_notify::NOTIFY_TRANS_SIZE)
+		if (nt.type == uuu_notify::NOTIFY_DECOMPRESS_START)
+		{
+			m_start_pos = 0;
+			m_cmd = nt.str;
+			m_cmd_start_time = nt.timestamp;
+			m_dev = "Prep";
+		}
+		if (nt.type == uuu_notify::NOTIFY_DOWNLOAD_START)
+		{
+			m_start_pos = 0;
+			m_cmd = nt.str;
+			m_cmd_start_time = nt.timestamp;
+			m_dev = "Prep";
+		}
+		if (nt.type == uuu_notify::NOTIFY_DOWNLOAD_END)
+		{
+			m_IsEmptyLine = true;
+		}
+		if (nt.type == uuu_notify::NOTIFY_TRANS_SIZE || nt.type == uuu_notify::NOTIFY_DECOMPRESS_SIZE)
 		{
 			m_trans_size = nt.total;
 			return false;
@@ -328,6 +367,7 @@ public:
 		}
 		if (nt.type == uuu_notify::NOTIFY_CMD_END)
 		{
+			m_cmd_end_time = nt.timestamp;
 			if(nt.status)
 			{
 				g_overall_status = nt.status;
@@ -337,21 +377,28 @@ public:
 			if (m_status)
 				g_overall_failure++;
 		}
-		if (nt.type == uuu_notify::NOTIFY_TRANS_POS)
+		if (nt.type == uuu_notify::NOTIFY_TRANS_POS || nt.type == uuu_notify::NOTIFY_DECOMPRESS_POS)
 		{
-			if (m_trans_size == 0)
-				return false;
+			if (m_trans_size == 0) {
 
+				m_trans_pos = nt.index;
+				return true;
+			}
+	
 			if ((nt.index - m_trans_pos) < (m_trans_size / 100)
 				&& nt.index != m_trans_size)
 				return false;
 
 			m_trans_pos = nt.index;
 		}
+
 		return true;
 	}
 	void print_verbose(uuu_notify*nt)
 	{
+		if (this->m_dev == "Prep" && g_start_usb_transfer)
+			return;
+
 		if (nt->type == uuu_notify::NOFITY_DEV_ATTACH)
 		{
 			cout << "New USB Device Attached at " << nt->str << endl;
@@ -362,22 +409,24 @@ public:
 		}
 		if (nt->type == uuu_notify::NOTIFY_CMD_END)
 		{
+			double diff = m_cmd_end_time - m_cmd_start_time;
+			diff /= 1000;
 			if (nt->status)
 			{
-				cout << m_dev << ">" << g_vt_red <<"Fail " << uuu_get_last_err_string() << g_vt_default << endl;
+				cout << m_dev << ">" << g_vt_red <<"Fail " << uuu_get_last_err_string() << "("<< std::setprecision(4) << diff << "s)" <<  g_vt_default << endl;
 			}
 			else
 			{
-				cout << m_dev << ">" << g_vt_green << "Okay" << g_vt_default << endl;
+				cout << m_dev << ">" << g_vt_green << "Okay ("<< std::setprecision(4) << diff << "s)" << g_vt_default << endl;
 			}
 		}
 
-		if (nt->type == uuu_notify::NOTIFY_TRANS_POS)
+		if (nt->type == uuu_notify::NOTIFY_TRANS_POS || nt->type == uuu_notify::NOTIFY_DECOMPRESS_POS)
 		{
 			if (m_trans_size)
 				cout << g_vt_yellow << "\r" << m_trans_pos * 100 / m_trans_size <<"%" << g_vt_default;
 			else
-				cout << ".";
+				cout << "\r" << m_trans_pos;
 
 			cout.flush();
 		}
@@ -387,6 +436,13 @@ public:
 
 		if (nt->type == uuu_notify::NOTIFY_WAIT_FOR)
 			cout << "\r" << nt->str << " "<< g_wait[((g_wait_index++) & 0x3)];
+
+		if (nt->type == uuu_notify::NOTIFY_DECOMPRESS_START)
+			cout << "Decompress file:" << nt->str << endl;
+
+		if (nt->type == uuu_notify::NOTIFY_DOWNLOAD_START)
+			cout << "Download file:" << nt->str << endl;
+
 	}
 	void print(int verbose = 0, uuu_notify*nt=NULL)
 	{
@@ -396,7 +452,7 @@ public:
 	{
 		string str;
 		str = m_dev;
-		str.resize(6, ' ');
+		str.resize(8, ' ');
 
 		string_ex s;
 		s.format("%2d/%2d", m_cmd_index+1, m_cmd_total);
@@ -407,8 +463,17 @@ public:
 	void print_simple()
 	{
 		int width = get_console_width();
+		int info, bar;
+		info = 14;
+		bar = 40;
 
-		if (width <= 45)
+		if (m_IsEmptyLine)
+		{
+			string str(width, ' ');
+			cout << str;
+			return;
+		}
+		if (width <= bar + info + 3)
 		{
 			string_ex str;
 
@@ -422,9 +487,6 @@ public:
 		else
 		{
 			string_ex str;
-			int info, bar;
-			info = 14;
-			bar = 40;
 			str += get_print_dev_string();
 
 			str.resize(info, ' ');
@@ -458,14 +520,14 @@ public:
 			cout << " ";
 			print_auto_scroll(m_cmd, width - bar - info-1, m_start_pos);
 
-			if(clock() - m_start_time > CLOCKS_PER_SEC/4)
-			{
-				m_start_pos ++;
-				m_start_time = clock();
-			}
-			cout << endl;
+if (clock() - m_start_time > CLOCKS_PER_SEC / 4)
+{
+	m_start_pos++;
+	m_start_time = clock();
+}
+cout << endl;
 
-			return;
+return;
 		}
 	}
 };
@@ -476,9 +538,12 @@ mutex g_callback_mutex;
 void print_oneline(string str)
 {
 	size_t w = get_console_width();
+	if (w <= 3)
+		return;
+
 	if (str.size() >= w)
 	{
-		str.resize(w-1);
+		str.resize(w - 1);
 		str[str.size() - 1] = '.';
 		str[str.size() - 2] = '.';
 		str[str.size() - 3] = '.';
@@ -491,22 +556,31 @@ void print_oneline(string str)
 
 }
 
-int pre_progress(uuu_notify nt)
+ShowNotify Summary(map<uint64_t, ShowNotify> *np)
 {
-	if (nt.type == uuu_notify::NOTIFY_DECOMPRESS_START)
+	ShowNotify sn;
+	for (auto it = np->begin(); it != np->end(); it++)
 	{
-		return 1;
+		if (it->second.m_dev == "Prep")
+		{
+			sn.m_trans_size += it->second.m_trans_size;
+			sn.m_trans_pos += it->second.m_trans_pos;
+		}
+		else
+		{
+			if (it->second.m_trans_pos || it->second.m_cmd_index)
+				g_start_usb_transfer = true; // Hidden HTTP download when USB start transfer
+		}
 	}
-	if (nt.type == uuu_notify::NOTIFY_DECOMPRESS_SIZE)
-	{
-		return 1;
-	}
-	if (nt.type == uuu_notify::NOTIFY_DECOMPRESS_POS)
-	{
-		return 1;
-	}
-	return 0;
+
+	if(g_start_usb_transfer)
+		sn.m_IsEmptyLine = true; // Hidden HTTP download when USB start transfer
+
+	sn.m_dev = "Prep";
+	sn.m_cmd = "Http Download\\Uncompress";
+	return sn;
 }
+
 int progress(uuu_notify nt, void *p)
 {
 	map<uint64_t, ShowNotify> *np = (map<uint64_t, ShowNotify>*)p;
@@ -514,17 +588,18 @@ int progress(uuu_notify nt, void *p)
 
 	std::lock_guard<std::mutex> lock(g_callback_mutex);
 
-	if (pre_progress(nt))
-		return 0;
-
 	if ((*np)[nt.id].update(nt))
 	{
-		if(!(*np)[nt.id].m_dev.empty())
-			g_map_path_nt[(*np)[nt.id].m_dev] = (*np)[nt.id];
+		if (!(*np)[nt.id].m_dev.empty())
+			if ((*np)[nt.id].m_dev != "Prep")
+				g_map_path_nt[(*np)[nt.id].m_dev] = (*np)[nt.id];
 
 		if (g_verbose)
 		{
-			(*np)[nt.id].print(g_verbose, &nt);
+			if((*np)[nt.id].m_dev == "Prep")
+				Summary(np).print(g_verbose, &nt);
+			else
+				(*np)[nt.id].print(g_verbose, &nt);
 		}
 		else
 		{
@@ -543,15 +618,21 @@ int progress(uuu_notify nt, void *p)
 
 			print_oneline(str);
 			print_oneline("");
+			if ((*np)[nt.id].m_dev == "Prep" && !g_start_usb_transfer)
+			{
+				Summary(np).print();
+			}else
+				print_oneline("");
 
 			for (it = g_map_path_nt.begin(); it != g_map_path_nt.end(); it++)
 				it->second.print();
 
-			for (size_t i = 0; i < g_map_path_nt.size() + 2; i++)
+			for (size_t i = 0; i < g_map_path_nt.size() + 3; i++)
 				cout << "\x1B[1F";
+
 		}
 
-		(*np)[nt.id] = g_map_path_nt[(*np)[nt.id].m_dev];
+		//(*np)[nt.id] = g_map_path_nt[(*np)[nt.id].m_dev];
 	}
 
 	if (nt.type == uuu_notify::NOTIFY_THREAD_EXIT)
@@ -671,7 +752,7 @@ int runshell(int shell)
 				if (uboot_cmd)
 					cmd = "fb: ucmd " + cmd;
 
-				int ret = uuu_run_cmd(cmd.c_str());
+				int ret = uuu_run_cmd(cmd.c_str(), 0);
 				if (ret)
 					cout << uuu_get_last_err_string() << endl;
 				else
@@ -691,6 +772,21 @@ void print_udev()
 	fprintf(stderr, "\tsudo sh -c \"uuu -udev >> /etc/udev/rules.d/99-uuu.rules\"\n");
 	fprintf(stderr, "2: update udev rule\n");
 	fprintf(stderr, "\tsudo udevadm control --reload-rules\n");
+}
+
+int print_usb_device(const char *path, const char *chip, const char *pro, uint16_t vid, uint16_t pid, uint16_t bcd, void *p)
+{
+	printf("\t%s\t %s\t %s\t 0x%04X\t0x%04X\t 0x%04X\n", path, chip, pro, vid, pid, bcd);
+	return 0;
+}
+
+void print_lsusb()
+{
+	cout << "Connected Known USB Devices\n";
+	printf("\tPath\t Chip\t Pro\t Vid\t Pid\t BcdVersion\n");
+	printf("\t==================================================\n");
+
+	uuu_for_each_devices(print_usb_device, NULL);
 }
 
 int main(int argc, char **argv)
@@ -729,6 +825,7 @@ int main(int argc, char **argv)
 	string filename;
 	string cmd;
 	int ret;
+	int dryrun  = 0;
 
 	string cmd_script;
 
@@ -753,6 +850,10 @@ int main(int argc, char **argv)
 			{
 				g_verbose = 1;
 				uuu_set_debug_level(2);
+			}else if (s == "-dry")
+			{
+				dryrun = 1;
+				g_verbose = 1;
 			}
 			else if (s == "-h")
 			{
@@ -770,9 +871,24 @@ int main(int argc, char **argv)
 				uuu_add_usbpath_filter(argv[i]);
 				g_usb_path_filter.push_back(argv[i]);
 			}
+			else if (s == "-t")
+			{
+				i++;
+				uuu_set_wait_timeout(atoll(argv[i]));
+			}
+			else if (s == "-pp")
+			{
+				i++;
+				uuu_set_poll_period(atoll(argv[i]));
+			}
+			else if (s == "-lsusb")
+			{
+				print_lsusb();
+				return 0;
+			}
 			else if (s == "-b" || s == "-brun")
 			{
-				if (i + 1 == argc || g_BuildScripts.find(argv[i + 1]) == g_BuildScripts.end())
+				if (i + 1 == argc)
 				{
 					printf("error, must be have script name: ");
 					g_BuildScripts.ShowCmds();
@@ -792,7 +908,35 @@ int main(int argc, char **argv)
 					args.push_back(s);
 				}
 
-				cmd_script = g_BuildScripts[argv[i + 1]].replace_script_args(args);
+				// if script name is not build-in, try to look for a file
+				if (g_BuildScripts.find(argv[i + 1]) == g_BuildScripts.end()) {
+					BuildCmd tmpCmd;
+					string tmpCmdFileName = argv[i + 1];
+					tmpCmd.m_cmd = tmpCmdFileName.c_str();
+
+					size_t filesize;
+
+					std::ifstream t(tmpCmdFileName);
+					std::string fileContents((std::istreambuf_iterator<char>(t)),
+						std::istreambuf_iterator<char>());
+
+					if (fileContents.empty()) {
+						printf("%s is not built-in script or fail load external script file", tmpCmdFileName.c_str());
+						return -1;
+					}
+
+					tmpCmd.m_buildcmd = fileContents.c_str();
+
+					tmpCmd.m_desc = "Script loaded from file";
+
+					BuildInScript tmpBuildInScript(&tmpCmd);
+					g_BuildScripts[tmpCmdFileName] = tmpBuildInScript;
+
+					cmd_script = g_BuildScripts[tmpCmdFileName].replace_script_args(args);
+				}
+				else {
+					cmd_script = g_BuildScripts[argv[i + 1]].replace_script_args(args);
+				}
 				break;
 			}
 			else if (s == "-bshow")
@@ -846,6 +990,18 @@ int main(int argc, char **argv)
 		return -1;
 	}
 
+	if (deamon && dryrun)
+	{
+		printf("Error: -d -dry Can't apply at the same time\n");
+		return -1;
+	}
+
+	if (shell && dryrun)
+	{
+		printf("Error: -dry -s Can't apply at the same time\n");
+		return -1;
+	}
+
 	if (g_verbose)
 	{
 		printf("%sBuild in config:%s\n", g_vt_boldwhite, g_vt_default);
@@ -878,7 +1034,7 @@ int main(int argc, char **argv)
 
 	if (!cmd.empty())
 	{
-		ret = uuu_run_cmd(cmd.c_str());
+		ret = uuu_run_cmd(cmd.c_str(), dryrun);
 
 		for (size_t i = 0; i < g_map_path_nt.size()+3; i++)
 			printf("\n");
@@ -892,7 +1048,7 @@ int main(int argc, char **argv)
 	}
 
 	if (!cmd_script.empty())
-		ret = uuu_run_cmd_script(cmd_script.c_str());
+		ret = uuu_run_cmd_script(cmd_script.c_str(), dryrun);
 	else
 		ret = uuu_auto_detect_file(filename.c_str());
 
@@ -904,11 +1060,17 @@ int main(int argc, char **argv)
 		return ret;
 	}
 
-	uuu_wait_uuu_finish(deamon);
+	if (uuu_wait_uuu_finish(deamon, dryrun))
+	{
+		cout << g_vt_red << "\nError: " << g_vt_default << uuu_get_last_err_string();
+		return -1;
+	}
 
 	runshell(shell);
 
 	/*Wait for the other thread exit, after send out CMD_DONE*/
 	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	if(!g_verbose)
+		printf("\n\n\n");
 	return g_overall_status;
 }

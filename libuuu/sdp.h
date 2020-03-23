@@ -171,10 +171,13 @@ public:
 class SDPDcdCmd : public SDPCmdBase
 {
 public:
+	uint32_t m_dcd_addr;
 	SDPDcdCmd(char *p):SDPCmdBase(p)
 	{
 		insert_param_info("dcd", NULL, Param::e_null);
 		insert_param_info("-f", &m_filename, Param::e_string_filename);
+		insert_param_info("-dcdaddr", &m_dcd_addr, Param::e_uint32);
+		m_dcd_addr = 0;
 	}
 	int run(CmdCtx *);
 
@@ -224,6 +227,7 @@ public:
 	uint32_t m_offset;
 	bool m_bIvtReserve;
 	bool m_bskipspl;
+	bool m_bskipfhdr;
 
 	SDPWriteCmd(char*p) :SDPCmdBase(p) {
 		m_spdcmd.m_cmd = ROM_KERNEL_CMD_WR_FILE;
@@ -241,6 +245,7 @@ public:
 		insert_param_info("-addr", &m_download_addr, Param::e_uint32);
 		insert_param_info("-offset", &m_offset, Param::e_uint32);
 		insert_param_info("-skipspl", &m_bskipspl, Param::e_bool);
+		insert_param_info("-skipfhdr", &m_bskipfhdr, Param::e_bool);
 	};
 
 	int run(CmdCtx *p);
@@ -252,16 +257,19 @@ class SDPJumpCmd : public SDPCmdBase
 public:
 	bool m_Ivt;
 	bool m_PlugIn;
+	bool m_clear_dcd;
 	uint32_t m_jump_addr;
 	SDPJumpCmd(char*p):SDPCmdBase(p)
 	{
 		m_jump_addr = 0;
 		m_spdcmd.m_cmd = ROM_KERNEL_CMD_JUMP_ADDR;
+		m_clear_dcd = false;
 		insert_param_info("jump", NULL, Param::e_null);
 		insert_param_info("-f", &m_filename, Param::e_string_filename);
 		insert_param_info("-ivt", &m_Ivt, Param::e_bool);
 		insert_param_info("-plugin", &m_Ivt, Param::e_bool);
 		insert_param_info("-addr", &m_jump_addr, Param::e_uint32);
+		insert_param_info("-cleardcd", &m_clear_dcd, Param::e_bool);
 	};
 	int run(CmdCtx *p);
 };
@@ -288,12 +296,19 @@ class SDPBootCmd : public SDPCmdBase
 {
 public:
 	bool m_nojump;
+	bool m_clear_dcd;
+	uint32_t m_dcd_addr;
 	SDPBootCmd(char *p) : SDPCmdBase(p)
 	{
 		insert_param_info("boot", NULL, Param::e_null);
 		insert_param_info("-f", &m_filename, Param::e_string_filename);
 		insert_param_info("-nojump", &m_nojump, Param::e_bool);
+		insert_param_info("-cleardcd", &m_clear_dcd, Param::e_bool);
+		insert_param_info("-dcdaddr", &m_dcd_addr, Param::e_uint32);
+
 		m_nojump = false;
+		m_clear_dcd = false;
+		m_dcd_addr = 0;
 	}
 	int run(CmdCtx *p);
 };

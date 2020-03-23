@@ -87,6 +87,8 @@ struct uuu_notify
 		NOTIFY_DECOMPRESS_SIZE,
 		NOTIFY_DECOMPRESS_POS, 
 
+		NOTIFY_DOWNLOAD_START,
+		NOTIFY_DOWNLOAD_END,
 		NOTIFY_THREAD_EXIT,
 
 		NOTIFY_DONE,
@@ -94,6 +96,7 @@ struct uuu_notify
 
 	NOTIFY_TYPE type;
 	uint64_t id;
+	uint64_t timestamp;
 	union
 	{
 		int status;
@@ -114,13 +117,20 @@ int uuu_for_each_cfg(uuu_show_cfg fn, void *p);
 typedef int(*uuu_ls_file)(const char *path, void *p);
 int uuu_for_each_ls_file(uuu_ls_file fn, const char *path, void *p);
 
-int uuu_run_cmd(const char * cmd);
-int uuu_run_cmd_script(const char *script);
+typedef int(*uuu_ls_usb_devices)(const char *path, const char *chip, const char *pro,  uint16_t vid, uint16_t pid, uint16_t bcd, void *p);
+int uuu_for_each_devices(uuu_ls_usb_devices fn, void *p);
+
+int uuu_run_cmd(const char * cmd, int dry);
+int uuu_run_cmd_script(const char *script, int dry);
 
 int uuu_auto_detect_file(const char * filename);
-int uuu_wait_uuu_finish(int deamon);
+int uuu_wait_uuu_finish(int deamon, int dry);
 int uuu_add_usbpath_filter(const char *path);
 
+/*Set timeout wait for known devices appeared*/
+int uuu_set_wait_timeout(int second);
+/*Set usb device polling period */
+void uuu_set_poll_period(int msecond);
 /*
  * bit 0:15 for libusb
  * bit 16:31 for uuu

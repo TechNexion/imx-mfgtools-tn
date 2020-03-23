@@ -26,8 +26,9 @@ SDPV: write -f _flash.bin -skipspl
 SDPV: jump
 # }
 
-FB: ucmd setenv fastboot_dev mmc
-FB: ucmd setenv mmcdev ${sd_dev}
-FB: ucmd mmc dev ${sd_dev}
-FB: flash bootloader _image
+FB: ucmd setenv fastboot_buffer ${loadaddr}
+FB: download -f _image
+# Burn image to nandfit partition if needed
+FB: ucmd if env exists nandfit_part; then nand erase.part nandfit; nand write ${fastboot_buffer} nandfit ${fastboot_bytes}; fi;
+FB: ucmd nandbcb init ${fastboot_buffer} nandboot ${fastboot_bytes}
 FB: Done

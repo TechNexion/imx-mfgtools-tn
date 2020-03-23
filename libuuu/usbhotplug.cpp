@@ -43,10 +43,16 @@
 #include "libcomm.h"
 #include "libuuu.h"
 #include "vector"
+#include <time.h>
 
 static vector<thread> g_running_thread;
 
 static vector<string> g_filter_usbpath;
+
+static int g_wait_usb_timeout = -1;
+static int g_usb_poll_period = 0;
+
+static int g_known_device_appeared;
 
 #ifdef _MSC_VER
 #define TRY_SUDO
@@ -148,10 +154,12 @@ static int usb_add(libusb_device *dev)
 		return -1;
 
 	ConfigItem *item = get_config()->find(desc.idVendor, desc.idProduct, desc.bcdDevice);
-	std::this_thread::sleep_for(std::chrono::milliseconds(200));
+	int poll = g_usb_poll_period ? g_usb_poll_period : 200;
+	std::this_thread::sleep_for(std::chrono::milliseconds(poll));
 
 	if (item)
 	{
+		g_known_device_appeared = 1;
 		std::thread(run_usb_cmds, item, dev).detach();
 	}
 	return 0;
@@ -221,6 +229,8 @@ int polling_usb(std::atomic<int>& bexit)
 	if (run_cmds("CFG:", NULL))
 		return -1;
 
+	time_t start = time(0);
+
 	while(!bexit)
 	{
 		ssize_t sz = libusb_get_device_list(NULL, &newlist);
@@ -237,7 +247,17 @@ int polling_usb(std::atomic<int>& bexit)
 
 		oldlist = newlist;
 
-		std::this_thread::sleep_for(std::chrono::milliseconds(200));
+		int poll = g_usb_poll_period ? g_usb_poll_period : 200;
+		std::this_thread::sleep_for(std::chrono::milliseconds(poll));
+
+		if (g_wait_usb_timeout >= 0 && !g_known_device_appeared)
+		{
+			if (difftime(time(0), start) >= g_wait_usb_timeout)
+			{
+				set_last_err_string("Timeout: Wait for Known USB Device");
+				return -1;
+			}
+		}
 	}
 
 	if(newlist)
@@ -267,6 +287,8 @@ int CmdUsbCtx::look_for_match_device(const char *pro)
 
 	if (run_cmds("CFG:", NULL))
 		return -1;
+
+	time_t start = time(0);
 
 	while (1)
 	{
@@ -325,6 +347,15 @@ int CmdUsbCtx::look_for_match_device(const char *pro)
 		nt.type = nt.NOTIFY_WAIT_FOR;
 		nt.str = (char*)"Wait for Known USB";
 		call_notify(nt);
+
+		if (g_wait_usb_timeout >= 0)
+		{
+			if (difftime(time(0), start) >= g_wait_usb_timeout)
+			{
+				set_last_err_string("Timeout: Wait for USB Device Appear");
+				return -1;
+			}
+		}
 	}
 
 	return -1;
@@ -334,4 +365,55 @@ int uuu_add_usbpath_filter(const char *path)
 {
 	g_filter_usbpath.push_back(path);
 	return 0;
+}
+
+int uuu_for_each_devices(uuu_ls_usb_devices fn, void *p)
+{
+	if (libusb_init(NULL) < 0)
+	{
+		set_last_err_string("Call libusb_init failure");
+		return -1;
+	}
+
+	libusb_device **newlist = NULL;
+	libusb_get_device_list(NULL, &newlist);
+	size_t i = 0;
+	libusb_device *dev;
+
+	while ((dev = newlist[i++]) != NULL)
+	{
+		struct libusb_device_descriptor desc;
+		int r = libusb_get_device_descriptor(dev, &desc);
+		if (r < 0) {
+			set_last_err_string("failure get device descrior");
+			return -1;
+		}
+		string str = get_device_path(dev);
+
+		ConfigItem *item = get_config()->find(desc.idVendor, desc.idProduct, desc.bcdDevice);
+		if (item)
+		{
+			if (fn(str.c_str(), item->m_chip.c_str(), item->m_protocol.c_str(), desc.idVendor, desc.idProduct, desc.bcdDevice, p))
+			{
+				set_last_err_string("call back return error");
+				return -1;
+			}
+		}
+	}
+
+	libusb_free_device_list(newlist, 1);
+	libusb_exit(NULL);
+
+	return 0;
+}
+
+int uuu_set_wait_timeout(int second)
+{
+	g_wait_usb_timeout = second;
+	return 0;
+}
+
+void uuu_set_poll_period(int msecond)
+{
+	g_usb_poll_period = msecond;
 }

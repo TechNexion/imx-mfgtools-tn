@@ -39,6 +39,8 @@
 #include <atomic>
 #include <thread>
 #include <string>
+#include <condition_variable>
+#include <string.h>
 
 #ifdef _MSC_VER
 #include <Windows.h>
@@ -59,15 +61,52 @@ class FileBuffer;
 int file_overwrite_monitor(string filename, FileBuffer *p);
 #endif 
 
-class FileBuffer
+//bit 0, data loaded
+//bit 1, data total size known
+#define FILEBUFFER_FLAG_LOADED_BIT		0x1
+#define FILEBUFFER_FLAG_KNOWN_SIZE_BIT  0x2
+#define FILEBUFFER_FLAG_ERROR_BIT		0x4
+
+#define FILEBUFFER_FLAG_LOADED		(FILEBUFFER_FLAG_LOADED_BIT|FILEBUFFER_FLAG_KNOWN_SIZE_BIT) // LOADED must be knownsize
+#define FILEBUFFER_FLAG_KNOWN_SIZE	FILEBUFFER_FLAG_KNOWN_SIZE_BIT
+
+class FileBuffer: public enable_shared_from_this<FileBuffer>
 {
 public:
-	vector<uint8_t> m_data;
-	uint8_t *m_pMapbuffer;
-	size_t m_MapSize;
+	mutex	m_data_mutex;
+
+	uint8_t *m_pDatabuffer;
+	size_t m_DataSize;
+	size_t m_MemSize;
+
+	shared_ptr<FileBuffer> m_ref;
+
+	enum
+	{
+		ALLOCATE_MALLOC,
+		ALLOCATE_MMAP,
+		ALLOCATE_REF,
+		ALLOCATE_VMALLOC,
+	}m_allocate_way;
+
+	int ref_other_buffer(shared_ptr<FileBuffer> p, size_t offset, size_t size)
+	{
+		m_pDatabuffer = p->data() + offset;
+		m_DataSize = m_MemSize = size;
+		m_allocate_way = ALLOCATE_REF;
+		m_ref = p;
+		return 0;
+	}
+
 	mutex m_async_mutex;
-	atomic_bool m_loaded;
+	
+	atomic_int m_dataflags;
+
 	thread m_aync_thread;
+
+	atomic_size_t m_avaible_size;
+	condition_variable m_request_cv;
+	mutex m_requext_cv_mutex;
 
 #ifdef WIN32
 	OVERLAPPED m_OverLapped;
@@ -79,51 +118,115 @@ public:
 
 	FileBuffer()
 	{
-		m_pMapbuffer = NULL;
-		m_MapSize = 0;
-		m_loaded = false;
+		m_pDatabuffer = NULL;
+		m_DataSize = 0;
+		m_MemSize = 0;
+		m_allocate_way = ALLOCATE_MALLOC;
+		m_dataflags = 0;
+		m_avaible_size = 0;
 	}
+
+	FileBuffer(void*p, size_t sz)
+	{
+		m_pDatabuffer = NULL;
+		m_DataSize = 0;
+		m_allocate_way = ALLOCATE_MALLOC;
+		m_MemSize = 0;
+
+		m_pDatabuffer = (uint8_t*)malloc(sz);
+		m_MemSize = m_DataSize = sz;
+
+		memcpy(m_pDatabuffer, p, sz);
+		m_dataflags = 0;
+	}
+
 	~FileBuffer()
 	{
 		if(m_aync_thread.joinable())
 			m_aync_thread.join();
-		unmapfile();
+
+		if (m_pDatabuffer)
+		{
+			if(m_allocate_way == ALLOCATE_MMAP)
+				unmapfile();
+			if(m_allocate_way == ALLOCATE_MALLOC)
+				free(m_pDatabuffer);
+		}
 	}
 
+	int request_data(vector<uint8_t> &data, size_t offset, size_t sz);
+	int request_data(size_t total);
+
+	bool IsLoaded()
+	{
+		return m_dataflags & FILEBUFFER_FLAG_LOADED_BIT;
+	}
+
+	bool IsKnownSize()
+	{
+		return m_dataflags & FILEBUFFER_FLAG_KNOWN_SIZE_BIT;
+	}
+
+	bool IsError()
+	{
+		return m_dataflags & FILEBUFFER_FLAG_ERROR_BIT;
+	}
 	uint8_t * data()
 	{
-		return m_pMapbuffer ? m_pMapbuffer : m_data.data();
+		return m_pDatabuffer ;
 	}
 
 	size_t size()
 	{
-		return m_pMapbuffer ? m_MapSize : m_data.size();
+		return m_DataSize;
 	}
 
 	uint8_t & operator[] (size_t index)
 	{
-		if (m_pMapbuffer) {
-			assert(index < m_MapSize);
-			return *(m_pMapbuffer + index);
-		}
-		else {
-			return m_data[index];
-		}
+		assert(m_pDatabuffer);
+		assert(index < m_DataSize);
+
+		return *(m_pDatabuffer + index);
 	}
 
 	uint8_t & at(size_t index)
 	{
 		return (*this)[index];
 	}
-	void resize(size_t sz)
+	int resize(size_t sz)
 	{
-		return m_data.resize(sz);
+		int ret = reserve(sz);
+
+		m_DataSize = sz;
+		return ret;
 	}
+
+	int reserve(size_t sz)
+	{
+		assert(m_allocate_way == ALLOCATE_MALLOC);
+
+		if (sz > m_MemSize)
+		{
+			m_pDatabuffer = (uint8_t*)realloc(m_pDatabuffer, sz);
+			m_MemSize = sz;
+
+			if (m_pDatabuffer == NULL)
+			{
+				set_last_err_string("Out of memory\n");
+				return -1;
+			}
+		}
+
+		return 0;
+	}
+
 	int swap(FileBuffer & a)
 	{
-		m_data.swap(a.m_data);
-		std::swap(m_pMapbuffer, a.m_pMapbuffer);
-		std::swap(m_MapSize, a.m_MapSize);
+		std::swap(m_pDatabuffer, a.m_pDatabuffer);
+		std::swap(m_DataSize, a.m_DataSize);
+		std::swap(m_MemSize, a.m_MemSize);
+		std::swap(m_allocate_way, a.m_allocate_way);
+
 		return 0;
 	}
 
@@ -180,8 +283,10 @@ public:
 			return -1;
 		}
 
-		m_pMapbuffer = (uint8_t *)MapViewOfFile(m_file_map, FILE_MAP_READ, 0, 0, sz);
-		m_MapSize = sz;
+		m_pDatabuffer = (uint8_t *)MapViewOfFile(m_file_map, FILE_MAP_READ, 0, 0, sz);
+		m_DataSize = sz;
+		m_MemSize = sz;
+		m_allocate_way = ALLOCATE_MMAP;
 		
 #else
 		int fd = open(filename.c_str(), O_RDONLY);
@@ -194,16 +299,18 @@ public:
 			return -1;
 		}
 
-		m_pMapbuffer = (uint8_t *)mmap64(0, sz, PROT_READ, MAP_SHARED, fd, 0);
-		if (m_pMapbuffer == MAP_FAILED) {
-			m_pMapbuffer = NULL;
+		m_pDatabuffer = (uint8_t *)mmap64(0, sz, PROT_READ, MAP_SHARED, fd, 0);
+		if (m_pDatabuffer == MAP_FAILED) {
+			m_pDatabuffer = NULL;
 			set_last_err_string("mmap failure\n");
 			return -1;
 		}
-		m_MapSize = sz;
+		m_DataSize = sz;
+		m_MemSize = sz;
+		m_allocate_way = ALLOCATE_MMAP;
 		close(fd);
 #endif
-		if (m_pMapbuffer)
+		if (m_pDatabuffer)
 			return 0;
 
 		set_last_err_string("mmap file failure");
@@ -212,11 +319,11 @@ public:
 
 	int unmapfile()
 	{
-		if (m_pMapbuffer)
+		if (m_pDatabuffer)
 		{
 #ifdef _MSC_VER
-			UnmapViewOfFile(m_pMapbuffer);
-			m_pMapbuffer = NULL;
+			UnmapViewOfFile(m_pDatabuffer);
+			m_pDatabuffer = NULL;
 			CloseHandle(m_file_map);
 			CloseHandle(m_file_handle);
 			SetEvent(m_OverLapped.hEvent);
@@ -227,9 +334,9 @@ public:
 			CloseHandle(m_OverLapped.hEvent);
 			m_OverLapped.hEvent = m_file_map = m_file_handle = INVALID_HANDLE_VALUE;
 #else
-			munmap(m_pMapbuffer, m_MapSize);
+			munmap(m_pDatabuffer, m_DataSize);
 #endif
-			m_pMapbuffer = NULL;
+			m_pDatabuffer = NULL;
 		}
 		return 0;
 	}
@@ -238,7 +345,7 @@ public:
 	int reload(string filename, bool async=false);
 };
 
-shared_ptr<FileBuffer> get_file_buffer(string filename);
+shared_ptr<FileBuffer> get_file_buffer(string filename, bool aysnc=false);
 bool check_file_exist(string filename, bool start_async_load=true);
 
 void set_current_dir(string dir);

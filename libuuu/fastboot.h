@@ -70,7 +70,8 @@ class FBCmd: public CmdBase
 public:
 	string m_fb_cmd;
 	string m_uboot_cmd;
-	FBCmd(char *p) :CmdBase(p) {}
+	char m_separator;
+	FBCmd(char *p) :CmdBase(p), m_separator(':') {}
 	int parser(char *p = NULL);
 	int run(CmdCtx *ctx);
 };
@@ -102,7 +103,7 @@ public:
 class FBOemCmd : public FBCmd
 {
 public:
-	FBOemCmd(char *p) : FBCmd(p) { m_fb_cmd = "oem"; }
+	FBOemCmd(char *p) : FBCmd(p) { m_fb_cmd = "oem"; m_separator = ' ';}
 };
 
 class FBFlashCmd : public FBCmd
@@ -110,12 +111,74 @@ class FBFlashCmd : public FBCmd
 public:
 	string m_filename;
 	string m_partition;
+	uint64_t m_totalsize;
 	bool m_raw2sparse;
 	FBFlashCmd(char *p) : FBCmd(p) { m_timeout = 10000; m_fb_cmd = "flash"; m_raw2sparse = false; }
 	int parser(char *p = NULL);
 	int run(CmdCtx *ctx);
 	int flash(FastBoot *fb, void *p, size_t sz);
 	int flash_raw2sparse(FastBoot *fb, shared_ptr<FileBuffer> p, size_t blksz, size_t max);
+	bool isffu(shared_ptr<FileBuffer> p);
+	int flash_ffu(FastBoot *fb, shared_ptr<FileBuffer> p);
+	int flash_ffu_oneblk(FastBoot *fb, shared_ptr<FileBuffer> p, size_t off, size_t blksz, size_t blkindex);
+};
+
+class FBDelPartition : public FBCmd
+{
+public:
+	FBDelPartition(char*p) : FBCmd(p) { m_fb_cmd = "delete-logical-partition"; }
+};
+
+class FBPartNumber : public CmdBase
+{
+public:
+	string m_partition_name;
+	string m_fb_cmd;
+	uint32_t m_Size;
+
+	FBPartNumber(char *p) :CmdBase(p)
+	{
+		m_Size = 0;
+		m_bCheckTotalParam = true;
+		m_NoKeyParam = true;
+		insert_param_info(NULL, &m_partition_name, Param::e_string, false, "partition name");
+		insert_param_info(NULL, &m_Size, Param::e_uint32, false, "partition size");
+	}
+	int run(CmdCtx *ctx);
+};
+
+class FBCreatePartition : public FBPartNumber
+{
+public:
+	FBCreatePartition(char*p) :FBPartNumber(p) {
+		m_fb_cmd = "create-logical-partition";
+	}
+};
+
+class FBResizePartition : public FBPartNumber
+{
+public:
+	FBResizePartition(char*p) :FBPartNumber(p) {
+		m_fb_cmd = "resize-logical-partition";
+	}
+};
+
+class FBUpdateSuper : public CmdBase
+{
+public:
+	string m_partition_name;
+	string m_fb_cmd;
+	string m_opt;
+
+	FBUpdateSuper(char *p) :CmdBase(p)
+	{
+		m_bCheckTotalParam = true;
+		m_NoKeyParam = true;
+		insert_param_info(NULL, &m_partition_name, Param::e_string, false, "partition name");
+		insert_param_info(NULL, &m_opt, Param::e_string, false, "partition size");
+		m_fb_cmd = "update-super";
+	}
+	int run(CmdCtx *ctx);
 };
 
 class FBEraseCmd : public FBCmd
@@ -152,4 +215,10 @@ public:
 	int parser(char *p=NULL);
 	FBCopy(char *p) :CmdBase(p) { m_Maxsize_pre_cmd = 0x10000; };
 	int run(CmdCtx *ctx);
+};
+
+class FBContinueCmd : public FBCmd
+{
+public:
+	FBContinueCmd(char *p) : FBCmd(p) { m_fb_cmd = "continue"; }
 };

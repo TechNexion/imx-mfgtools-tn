@@ -1,7 +1,8 @@
-version: 1.2.{build}
+version: 1.3.{build}
 image:
+- Visual Studio 2019
 - Visual Studio 2017
-- Ubuntu1804
+- Ubuntu1604
 
 configuration: 
 - Debug
@@ -22,31 +23,54 @@ install:
     
 - cmd: cd %APPVEYOR_BUILD_FOLDER%\libusb
     
-- cmd:   git apply ..\msvc\0001-Static-link-C-library.patch
-    
 - cmd:    cd ..
  
 - sh: sudo apt-get update
 
-- sh: sudo apt-get --yes --force-yes install libusb-1.0-0-dev
+- sh: sudo DEBIAN_FRONTEND=noninteractive apt-get  --yes --force-yes install libusb-1.0-0-dev
 
-- sh: sudo apt-get --yes --force-yes install libzip-dev
+- sh: sudo DEBIAN_FRONTEND=noninteractive apt-get --yes --force-yes install libzip-dev
 
-- sh: sudo apt-get --yes --force-yes install libbz2-dev
+- sh: sudo DEBIAN_FRONTEND=noninteractive apt-get --yes --force-yes install libbz2-dev
     
-- sh: sudo apt-get --yes --force-yes install asciidoc
+- sh: sudo DEBIAN_FRONTEND=noninteractive apt-get --yes --force-yes install asciidoc
     
-- sh: sudo apt-get --yes --force-yes install rename
+- sh: sudo DEBIAN_FRONTEND=noninteractive apt-get --yes --force-yes install rename
 
 build_script:
 
-- cmd: msbuild %APPVEYOR_BUILD_FOLDER%/msvc/uuu.sln /verbosity:minimal /logger:"C:\Program Files\AppVeyor\BuildAgent\Appveyor.MSBuildLogger.dll"
+# below powershell actions equals to retarget projects to newest SDK and tool v142 in visual studio 2019
+- ps: If($env:APPVEYOR_BUILD_WORKER_IMAGE -eq "Visual Studio 2019")  {(gc msvc\uuu.vcxproj) -replace '141', '142' | Out-File -encoding ASCII msvc\uuu.vcxproj}
+- ps: If($env:APPVEYOR_BUILD_WORKER_IMAGE -eq "Visual Studio 2019")  {(gc msvc\uuu.vcxproj) -replace '10.0.16299.0', '10.0' | Out-File -encoding ASCII msvc\uuu.vcxproj}
+- ps: If($env:APPVEYOR_BUILD_WORKER_IMAGE -eq "Visual Studio 2019")  {(gc msvc\bzip2.vcxproj) -replace '141', '142' | Out-File -encoding ASCII msvc\bzip2.vcxproj}
+- ps: If($env:APPVEYOR_BUILD_WORKER_IMAGE -eq "Visual Studio 2019")  {(gc msvc\bzip2.vcxproj) -replace '10.0.16299.0', '10.0' | Out-File -encoding ASCII msvc\bzip2.vcxproj}
+- ps: If($env:APPVEYOR_BUILD_WORKER_IMAGE -eq "Visual Studio 2019")  {(gc msvc\libuuu.vcxproj) -replace '141', '142' | Out-File -encoding ASCII msvc\libuuu.vcxproj}
+- ps: If($env:APPVEYOR_BUILD_WORKER_IMAGE -eq "Visual Studio 2019")  {(gc msvc\libuuu.vcxproj) -replace '10.0.16299.0', '10.0' | Out-File -encoding ASCII msvc\libuuu.vcxproj}
+- ps: If($env:APPVEYOR_BUILD_WORKER_IMAGE -eq "Visual Studio 2019")  {(gc msvc\zlib.vcxproj) -replace '141', '142' | Out-File -encoding ASCII msvc\zlib.vcxproj}
+- ps: If($env:APPVEYOR_BUILD_WORKER_IMAGE -eq "Visual Studio 2019")  {(gc msvc\zlib.vcxproj) -replace '10.0.16299.0', '10.0' | Out-File -encoding ASCII msvc\zlib.vcxproj}
+- ps: If($env:APPVEYOR_BUILD_WORKER_IMAGE -eq "Visual Studio 2019")  {(gc libusb\msvc\libusb_dll_2017.vcxproj) -replace '10.0.16299.0', '10.0' | Out-File -encoding ASCII libusb\msvc\libusb_dll_2017.vcxproj}
+- ps: If($env:APPVEYOR_BUILD_WORKER_IMAGE -eq "Visual Studio 2019")  {(gc libusb\msvc\libusb_dll_2017.vcxproj) -replace '141', '142' | Out-File -encoding ASCII libusb\msvc\libusb_dll_2017.vcxproj}
+- ps: If($env:APPVEYOR_BUILD_WORKER_IMAGE -eq "Visual Studio 2019")  {(gc msvc\uuu-static-link.vcxproj) -replace '141', '142' | Out-File -encoding ASCII msvc\uuu-static-link.vcxproj}
+- ps: If($env:APPVEYOR_BUILD_WORKER_IMAGE -eq "Visual Studio 2019")  {(gc msvc\uuu-static-link.vcxproj) -replace '10.0.16299.0', '10.0' | Out-File -encoding ASCII msvc\uuu-static-link.vcxproj}
+- ps: If($env:APPVEYOR_BUILD_WORKER_IMAGE -eq "Visual Studio 2019")  {(gc libusb\msvc\libusb_static_2017.vcxproj) -replace '10.0.16299.0', '10.0' | Out-File -encoding ASCII libusb\msvc\libusb_static_2017.vcxproj}
+- ps: If($env:APPVEYOR_BUILD_WORKER_IMAGE -eq "Visual Studio 2019")  {(gc libusb\msvc\libusb_static_2017.vcxproj) -replace '141', '142' | Out-File -encoding ASCII libusb\msvc\libusb_static_2017.vcxproj}
+
+
+- cmd: if "%APPVEYOR_BUILD_WORKER_IMAGE%" == "Visual Studio 2019" (msbuild %APPVEYOR_BUILD_FOLDER%/msvc/uuu.sln /verbosity:minimal /logger:"C:\Program Files\AppVeyor\BuildAgent\Appveyor.MSBuildLogger.dll")
+#coverity tool is only available to visual studio 2017 imagine in appveyor
+- cmd: if "%APPVEYOR_BUILD_WORKER_IMAGE%" == "Visual Studio 2017" (cov-build --dir cov-int msbuild %APPVEYOR_BUILD_FOLDER%/msvc/uuu.sln /verbosity:minimal /logger:"C:\Program Files\AppVeyor\BuildAgent\Appveyor.MSBuildLogger.dll")
+
+- cmd: if "%APPVEYOR_BUILD_WORKER_IMAGE%" == "Visual Studio 2017" (7z a -tzip mfg.zip cov-int)
+
+- cmd: if "%APPVEYOR_BUILD_WORKER_IMAGE%" == "Visual Studio 2017" (curl --form token=%coverity_token% --form email=frank.li@nxp.com --form file=@mfg.zip --form version="automation test"  --form description="testing coverity automation" https://scan.coverity.com/builds?project=NXPmicro%2Fmfgtools)
+
+- cmd: git clean -dxf .
 
 - cmd: msbuild %APPVEYOR_BUILD_FOLDER%/msvc/uuu-static-link.sln /verbosity:minimal /logger:"C:\Program Files\AppVeyor\BuildAgent\Appveyor.MSBuildLogger.dll"
 
 - cmd: if exist %APPVEYOR_BUILD_FOLDER%\x64\release\lib\uuu.exe  cp %APPVEYOR_BUILD_FOLDER%\x64\release\lib\uuu.exe  %APPVEYOR_BUILD_FOLDER%\uuu.exe
    
-- sh: cmake .
+- sh: cmake -D 'STATIC=1' .
 - sh: make
      
 - sh: git clone https://github.com/NXPmicro/mfgtools.wiki.git
@@ -77,3 +101,7 @@ deploy:
     secure: SWWVkwSfPyVIaPChBBl+uAA3Fau9Rl5iNPQ9VRL8yyggXvc6wPcr/O9iXBMVM7Ju
   artifact: uuu.exe;  libusb-1.0.dll; uuu/uuu; mfgtools.wiki/UUU.pdf
   draft: true
+
+environment:
+  coverity_token:
+    secure: 5VvyV4fYfI6xPsqaeDHvBamkUmmVNjZj0J5pLLQ6NCw=

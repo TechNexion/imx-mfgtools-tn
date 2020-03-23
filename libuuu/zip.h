@@ -87,6 +87,27 @@ struct Zip_central_dir
 	uint8_t filename[0];
 };
 
+struct Zip64_central_dir
+{
+	uint32_t sign;
+	uint16_t version;
+	uint16_t version_mini_extract;
+	uint16_t flags;
+	uint16_t compress_method;
+	uint16_t last_modidfy_time;
+	uint16_t last_modidfy_date;
+	uint32_t crc;
+	uint32_t compressed_size;
+	uint32_t uncompressed_size;
+	uint16_t file_name_length;
+	uint16_t extrafield_length;
+	uint16_t file_comment_length;
+	uint16_t disk_number;
+	uint16_t internal_file_attr;
+	uint32_t external_file_attr;
+	uint32_t offset;
+	uint8_t filename[0];
+};
 struct Zip_eocd
 {
 	uint32_t sign;
@@ -100,10 +121,40 @@ struct Zip_eocd
 	uint8_t  comment[0];
 };
 
+struct Zip64_eocd_locator
+{
+	uint32_t sign;
+	uint32_t num_of_thisdisk;
+	uint64_t offset_of_eocd;
+	uint32_t total_num_disks;
+};
+
+struct Zip64_eocd
+{
+	uint32_t sign;
+	uint64_t size_of_eocd;
+	uint16_t version;
+	uint16_t version_mini_extract;
+	uint32_t num_of_dir_ondisk;
+	uint32_t num_of_disk;
+	uint64_t total_ondisk;
+	uint64_t total;
+	uint64_t size;
+	uint64_t offset;
+};
+
+struct Zip_ext
+{
+	uint16_t tag;
+	uint16_t size;
+};
+
 #define EOCD_SIGNATURE 0x06054b50
 #define DIR_SIGNTURE 0x02014b50
 #define DATA_SIGNATURE 0x08074b50
 #define FILE_SIGNATURE 0x04034b50
+#define EOCD64_LOCATOR_SIGNATURE 0x07064b50
+#define EOCD64_SIGNATURE 0x06064b50
 
 class Backfile
 {
@@ -119,11 +170,12 @@ public:
 	string m_filename;
 	uint32_t m_timestamp;
 	size_t m_filesize;
-	uint32_t m_offset;
+	size_t m_compressedsize;
+	size_t m_offset;
 	z_stream m_strm;
 	bool m_decompressed;
 
-	shared_ptr<FileBuffer> decompress(Zip *pZip);
+	int decompress(Zip *pZip, shared_ptr<FileBuffer> p);
 	Zip_file_Info();
 	~Zip_file_Info();
 };
@@ -153,7 +205,7 @@ public:
 		return true;
 	}
 
-	shared_ptr<FileBuffer> get_file_buff(string filename)
+	int get_file_buff(string filename, shared_ptr<FileBuffer>p)
 	{
 		if (m_filemap.find(filename) == m_filemap.end())
 		{
@@ -161,7 +213,7 @@ public:
 			err += "Can't find file ";
 			err += filename;
 			set_last_err_string(err);
-			return NULL;
+			return -1;
 		}
 
 		uuu_notify ut;
@@ -169,7 +221,7 @@ public:
 		ut.str = (char*)filename.c_str();
 		call_notify(ut);
 
-		return m_filemap[filename].decompress(this);
+		return m_filemap[filename].decompress(this, p);
 	}
 };
 

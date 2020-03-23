@@ -39,6 +39,9 @@ using namespace std;
 #include <thread>
 #include <mutex>
 #include <iostream>
+#include <time.h>
+#include <chrono>
+#include <ctime>
 
 struct  notify_map
 {
@@ -48,6 +51,9 @@ struct  notify_map
 
 static vector<struct notify_map> g_notify_callback_list;
 static mutex g_mutex_nofity;
+
+using namespace std::chrono;
+static time_point<steady_clock> g_now = steady_clock::now();
 
 int uuu_register_notify_callback(uuu_notify_fun f, void *data)
 {
@@ -91,6 +97,8 @@ void call_notify(struct uuu_notify nf)
 
 	vector<struct notify_map>::iterator it = g_notify_callback_list.begin();
 	nf.id = std::hash<std::thread::id>{}(std::this_thread::get_id());
+
+	nf.timestamp = duration_cast<milliseconds>(steady_clock::now() - g_now).count();
 
 	for (; it != g_notify_callback_list.end(); it++)
 	{

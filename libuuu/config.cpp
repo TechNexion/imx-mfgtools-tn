@@ -38,12 +38,16 @@ static Config g_config;
 
 #define FSL_VID 0x15A2
 #define NXP_VID 0x1FC9
+#define BD_VID 0x3016
 
 Config::Config()
 {
 	push_back(ConfigItem("SDPS:", "MX8QXP", NULL,   NXP_VID, 0x012F, 0x0002));
 	push_back(ConfigItem("SDPS:", "MX8QM",  "MX8QXP",   NXP_VID, 0x0129, 0x0002));
+	push_back(ConfigItem("SDPS:", "MX8DXL", "MX8QXP",   NXP_VID, 0x0147));
 	push_back(ConfigItem("SDPS:", "MX28",   NULL,   FSL_VID, 0x004f));
+	push_back(ConfigItem("SDPS:", "MX815",  NULL,   NXP_VID, 0x013E));
+	push_back(ConfigItem("SDPS:", "MX865",  "MX815",   NXP_VID, 0x0146));
 	push_back(ConfigItem("SDP:", "MX7D",    NULL,   FSL_VID, 0x0076));
 	push_back(ConfigItem("SDP:", "MX6Q",    NULL,   FSL_VID, 0x0054));
 	push_back(ConfigItem("SDP:", "MX6D",    "MX6Q", FSL_VID, 0x0061));
@@ -59,6 +63,8 @@ Config::Config()
 	push_back(ConfigItem("SDPU:", "SPL",    "SPL",  0x0525, 0xB4A4, 0,      0x04FF));
 	push_back(ConfigItem("SDPV:", "SPL1",   "SPL",  0x0525, 0xB4A4, 0x0500, 0x9998));
 	push_back(ConfigItem("SDPU:", "SPL",    "SPL",  0x0525, 0xB4A4, 0x9999, 0x9999)); /*old i.MX8 MQEVk use bcd 9999*/
+	push_back(ConfigItem("SDPU:", "SPL",    "SPL",  BD_VID, 0x1001, 0,      0x04FF));
+	push_back(ConfigItem("SDPV:", "SPL1",   "SPL",  BD_VID, 0x1001, 0x0500, 0x9998));
 	push_back(ConfigItem("FBK:", NULL, NULL, 0x066F, 0x9AFE));
 	push_back(ConfigItem("FBK:", NULL, NULL, 0x066F, 0x9BFF));
 	push_back(ConfigItem("FB:", NULL, NULL,  0x0525, 0xA4A5));

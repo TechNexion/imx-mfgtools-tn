@@ -33,6 +33,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <locale>
 
 using namespace std;
 
@@ -104,11 +105,16 @@ public:
 		for (size_t i = 1; i < m_script.size(); i++)
 		{
 			size_t off;
+			size_t off_tab;
 			string param;
-			if (m_script[i] == '_' && m_script[i - 1] == ' ')
+			if (m_script[i] == '_' 
+				&& (m_script[i - 1] == '@' || m_script[i - 1] == ' '))
 			{
 				off = m_script.find(' ', i);
+				off_tab = m_script.find('\t', i);
 				size_t ofn = m_script.find('\n', i);
+				if (off_tab < off)
+					off = off_tab;
 				if (ofn < off)
 					off = ofn;
 
@@ -172,8 +178,27 @@ public:
 		}
 	}
 
+	inline string str_to_upper(string str)
+	{
+		std::locale loc;
+		string s;
+
+		for (size_t i = 0; i < str.size(); i++)
+			s.push_back(std::toupper(str[i], loc));
+
+		return s;
+	}
+
 	string replace_str(string str, string key, string replace)
 	{
+		if (replace.size() > 4)
+		{
+			if (str_to_upper(replace.substr(replace.size() - 4)) == ".BZ2")
+			{
+				replace += "/*";
+			}
+		}
+
 		for (size_t j = 0; (j = str.find(key, j)) != string::npos;)
 		{
 			str.replace(j, key.size(), replace);

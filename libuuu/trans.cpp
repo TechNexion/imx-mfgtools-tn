@@ -90,16 +90,31 @@ int HIDTrans::write(void *buff, size_t size)
 {
 	int ret;
 	uint8_t *p = (uint8_t *)buff;
-	ret = libusb_control_transfer(
-		(libusb_device_handle *)m_devhandle,
-		LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_CLASS | LIBUSB_RECIPIENT_INTERFACE,
-		m_set_report,
-		(2 << 8) | p[0],
-		0,
-		p,
-		size,
-		1000
+	int actual_size;
+	if (m_outEP)
+	{
+		ret = libusb_interrupt_transfer(
+			(libusb_device_handle *)m_devhandle,
+			m_outEP,
+			p,
+			size,
+			&actual_size,
+			1000
 		);
+	}
+	else
+	{
+		ret = libusb_control_transfer(
+			(libusb_device_handle *)m_devhandle,
+			LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_CLASS | LIBUSB_RECIPIENT_INTERFACE,
+			m_set_report,
+			(2 << 8) | p[0],
+			0,
+			p,
+			size,
+			1000
+		);
+	}
 
 	if (ret < 0)
 	{
@@ -222,6 +237,13 @@ int BulkTrans::read(void *buff, size_t size, size_t *rsize)
 	int ret;
 	int actual_lenght;
 	uint8_t *p = (uint8_t *)buff;
+
+	if (size == 0)
+	{
+		*rsize = 0;
+		return 0;
+	}
+
 	ret = libusb_bulk_transfer(
 		(libusb_device_handle *)m_devhandle,
 		m_ep_in.addr,

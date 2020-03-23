@@ -72,18 +72,34 @@ int CmdBase::parser(char *p)
 	if (param.find(':') != string::npos)
 		param = get_next_param(m_cmd, pos);
 
+	int index = 0;
+
 	while (pos < m_cmd.size())
 	{
 		param = get_next_param(m_cmd, pos);
 
 		struct Param *pp = NULL;
-		for (size_t i = 0; i < m_param.size(); i++)
+
+		if (m_NoKeyParam)
 		{
-			string key = string(m_param[i].key);
-			if (compare_str(param, key, m_param[i].ignore_case))
+			if (index > m_param.size())
 			{
-				pp = &(m_param[i]);
-				break;
+				set_last_err_string("More parameter then expected");
+				return -1;
+			}
+			pp = &(m_param[index]);
+			index++;
+		}
+		else
+		{
+			for (size_t i = 0; i < m_param.size(); i++)
+			{
+				string key = string(m_param[i].key);
+				if (compare_str(param, key, m_param[i].ignore_case))
+				{
+					pp = &(m_param[i]);
+					break;
+				}
 			}
 		}
 
@@ -98,13 +114,15 @@ int CmdBase::parser(char *p)
 
 		if (pp->type == Param::e_uint32)
 		{
-			param = get_next_param(m_cmd, pos);
+			if (!m_NoKeyParam)
+				param = get_next_param(m_cmd, pos);
 			*(uint32_t*)pp->pData = str_to_uint(param);
 		}
 
 		if (pp->type == Param::e_string_filename)
 		{
-			param = get_next_param(m_cmd, pos);
+			if (!m_NoKeyParam)
+				param = get_next_param(m_cmd, pos);
 			*(string*)pp->pData = param;
 
 			if (!check_file_exist(param))
@@ -113,7 +131,8 @@ int CmdBase::parser(char *p)
 
 		if (pp->type == Param::e_string)
 		{
-			param = get_next_param(m_cmd, pos);
+			if (!m_NoKeyParam)
+				param = get_next_param(m_cmd, pos);
 			*(string*)pp->pData = param;
 		}
 
@@ -126,10 +145,35 @@ int CmdBase::parser(char *p)
 		{
 		}
 	}
+
+	if (m_bCheckTotalParam)
+	{
+		if (index < m_param.size())
+		{
+			string str;
+			str += "Missed: ";
+			str += m_param[index].Error;
+			set_last_err_string(str);
+			return -1;
+		}
+	}
 	return 0;
 }
 
-int CmdList::run_all(CmdCtx *p, bool dry_run)
+int CmdBase::dump()
+{
+	uuu_notify nt;
+	nt.type = uuu_notify::NOTIFY_CMD_INFO;
+
+	string str =  m_cmd;
+	str += "\n";
+	nt.str = (char*)str.c_str();
+	call_notify(nt);
+
+	return 0;
+}
+
+int CmdList::run_all(CmdCtx *p, bool dry)
 {
 	CmdList::iterator it;
 	int ret;
@@ -143,33 +187,29 @@ int CmdList::run_all(CmdCtx *p, bool dry_run)
 
 	for (it = begin(); it != end(); it++, i++)
 	{
-		if (dry_run)
-		{
-			(*it)->dump();
-		}
+		uuu_notify nt;
+
+		nt.type = uuu_notify::NOTIFY_CMD_INDEX;
+		nt.index = i;
+		call_notify(nt);
+
+		nt.type = uuu_notify::NOTIFY_CMD_START;
+		nt.str = (char *)(*it)->m_cmd.c_str();
+		call_notify(nt);
+
+		if (dry)
+			ret = (*it)->dump();
 		else
-		{
-			uuu_notify nt;
-
-			nt.type = uuu_notify::NOTIFY_CMD_INDEX;
-			nt.index = i;
-			call_notify(nt);
-
-			nt.type = uuu_notify::NOTIFY_CMD_START;
-			nt.str = (char *)(*it)->m_cmd.c_str();
-			call_notify(nt);
-
 			ret = (*it)->run(p);
 
-			nt.type = uuu_notify::NOTIFY_CMD_END;
-			nt.status = ret;
-			call_notify(nt);
-			if (ret)
-				return ret;
+		nt.type = uuu_notify::NOTIFY_CMD_END;
+		nt.status = ret;
+		call_notify(nt);
+		if (ret)
+			return ret;
 
-			if ((*it)->m_lastcmd)
+		if ((*it)->m_lastcmd)
 				break;
-		}
 	}
 	return ret;
 }
@@ -246,6 +286,16 @@ uint32_t str_to_uint(string &str)
 	return strtoul(str.c_str(), NULL, 10);
 }
 
+uint64_t str_to_uint64(string &str)
+{
+	if (str.size() > 2)
+	{
+		if (str.substr(0, 2).compare("0x") == 0)
+			return strtoull(str.substr(2).c_str(), NULL, 16);
+	}
+	return strtoull(str.c_str(), NULL, 10);
+}
+
 template <class T> shared_ptr<CmdBase> new_cmd_obj(char *p)
 {
 	return shared_ptr<CmdBase>(new T(p));
@@ -292,6 +342,17 @@ CmdObjCreateMap::CmdObjCreateMap()
 	(*this)["FASTBOOT:FLASHING"] = new_cmd_obj<FBFlashingCmd>;
 	(*this)["FB:SET_ACTIVE"] = new_cmd_obj<FBSetActiveCmd>;
 	(*this)["FASTBOOT:SET_ACTIVE"] = new_cmd_obj<FBSetActiveCmd>;
+	(*this)["FB:CONTINUE"] = new_cmd_obj<FBContinueCmd>;
+	(*this)["FASTBOOT:CONTINUE"] = new_cmd_obj<FBContinueCmd>;
+
+	(*this)["FB:UPDATE-SUPER"] = new_cmd_obj<FBUpdateSuper>;
+	(*this)["FASTBOOT:UPDATE-SUPER"] = new_cmd_obj<FBUpdateSuper>;
+	(*this)["FB:CREATE-LOGICAL-PARTITION"] = new_cmd_obj<FBCreatePartition>;
+	(*this)["FASTBOOT:CREATE-LOGICAL-PARTITION"] = new_cmd_obj<FBCreatePartition>;
+	(*this)["FB:DELETE-LOGICAL-PARTITION"] = new_cmd_obj<FBDelPartition>;
+	(*this)["FASTBOOT:DELETE-LOGICAL-PARTITION"] = new_cmd_obj<FBDelPartition>;
+	(*this)["FB:RESIZE-LOGICAL-PARTITION"] = new_cmd_obj<FBResizePartition>;
+	(*this)["FASTBOOT:RESIZE-LOGICAL-PARTITION"] = new_cmd_obj<FBResizePartition>;
 
 	(*this)["FBK:UCMD"] = new_cmd_obj<FBUCmd>;
 	(*this)["FBK:ACMD"] = new_cmd_obj<FBACmd>;
@@ -340,7 +401,7 @@ shared_ptr<CmdBase> create_cmd_obj(string cmd)
 	return NULL;
 }
 
-int uuu_run_cmd(const char * cmd)
+int uuu_run_cmd(const char * cmd, int dry)
 {
 	shared_ptr<CmdBase> p;
 	p = create_cmd_obj(cmd);
@@ -362,7 +423,7 @@ int uuu_run_cmd(const char * cmd)
 	{
 		size_t pos = 0;
 		string c = cmd;
-		
+
 		string pro = get_next_param(c, pos, ':');
 		pro = remove_square_brackets(pro);
 		pro += ":";
@@ -371,17 +432,23 @@ int uuu_run_cmd(const char * cmd)
 			ret = -1;
 		else
 		{
-			CmdUsbCtx ctx;
-			ret = ctx.look_for_match_device(pro.c_str());
-			if (ret)
-				return ret;
+			if (dry)
+			{
+				ret = p->dump();
+			}else
+			{
+				CmdUsbCtx ctx;
+				ret = ctx.look_for_match_device(pro.c_str());
+				if (ret)
+					return ret;
 
-			ret = p->run(&ctx);
+				ret = p->run(&ctx);
+			}
 		}
 	}
 	else
 	{
-		return ret =p->run(NULL);
+		return ret = dry? p->dump() : p->run(NULL);
 	}
 
 	nt.type = uuu_notify::NOTIFY_CMD_END;
@@ -481,7 +548,7 @@ int CmdShell::run(CmdCtx*)
 			if (pos != string::npos)
 				cmd = cmd.substr(0, pos);
 
-			return uuu_run_cmd(cmd.c_str());
+			return uuu_run_cmd(cmd.c_str(), 0);
 		}
 		uuu_notify nt;
 		nt.type = uuu_notify::NOTIFY_CMD_INFO;
@@ -643,11 +710,10 @@ int check_version(string str)
 	return 0;
 }
 
-int uuu_run_cmd_script(const char * buff)
+int uuu_run_cmd_script(const char * buff, int dry)
 {
-	shared_ptr<FileBuffer> p(new FileBuffer);
-	p->m_data.resize(strlen(buff));
-	memcpy(p->m_data.data(), buff, strlen(buff));
+	shared_ptr<FileBuffer> p(new FileBuffer((void*)buff, strlen(buff)));
+	
 	return parser_cmd_list_file(p);
 }
 
@@ -746,14 +812,28 @@ int notify_done(uuu_notify nt, void *p)
 
 	return 0;
 }
-int uuu_wait_uuu_finish(int deamon)
+int uuu_wait_uuu_finish(int deamon, int dry)
 {
 	std::atomic<int> exit;
 	exit = 0;
+
+	if(dry) {
+		for(auto it=g_cmd_map.begin(); it != g_cmd_map.end(); it++)
+		{
+			for(auto cmd = it->second->begin(); cmd != it->second->end(); cmd++)
+			{
+				(*cmd)->dump();
+			}
+		}
+		return 0;
+	}
+
 	if (!deamon)
 		uuu_register_notify_callback(notify_done, &exit);
 
-	polling_usb(exit);
+	if(polling_usb(exit))
+		return -1;
 
 	return 0;
 }
+

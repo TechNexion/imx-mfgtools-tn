@@ -3,15 +3,28 @@ cmake_minimum_required(VERSION 3.4)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+find_package(BZip2 REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBUSB REQUIRED libusb-1.0>=1.0.16)
 pkg_check_modules(LIBZIP REQUIRED libzip)
 find_package(Threads)
 
-include_directories(${LIBUSB_INCLUDE_DIRS} include)
+if (STATIC)
+set(OPENSSL_USE_STATIC_LIBS TRUE)
+endif()
 
-set(CMAKE_CXX_FLAGS_DEBUG "-g -Wall -Wstrict-aliasing -Wextra")
-set(CMAKE_CXX_FLAGS "-O2")
+find_package(OpenSSL)
+
+if(OPENSSL_FOUND)
+set(UUUSSL "-DUUUSSL")
+set(UUUOPENSLL_INCLUDE_DIR ${OPENSSL_INCLUDE_DIR})
+endif()
+
+include_directories(${LIBUSB_INCLUDE_DIRS} ${UUUOPENSLL_INCLUDE_DIR} include)
+
+
+set(CMAKE_CXX_FLAGS_DEBUG "-g -Wall -Wstrict-aliasing -Wextra ${UUUSSL}")
+set(CMAKE_CXX_FLAGS "-O2 ${UUUSSL}")
 
 set(SOURCES
 	error.cpp
@@ -28,7 +41,9 @@ set(SOURCES
 	fastboot.cpp
 	zip.cpp
 	fat.cpp
+	tar.cpp
 	rominfo.cpp
+	http.cpp
 )
 
 set(generated_files_dir "${CMAKE_BINARY_DIR}/libuuu/gen")

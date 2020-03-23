@@ -75,9 +75,24 @@ struct _ST_HID_CBW
 
 #pragma pack ()
 
+#include "rominfo.h"
+
 int SDPSCmd::run(CmdCtx *pro)
 {
+	ROM_INFO * rom;
+	rom = search_rom_info(pro->m_config_item);
+	if (rom == NULL)
+	{
+		string_ex err;
+		err.format("%s:%d can't get rom info", __FUNCTION__, __LINE__);
+		set_last_err_string(err);
+		return -1;
+	}
+
 	HIDTrans dev;
+	if (rom->flags & ROM_INFO_HID_EP1)
+		dev.set_hid_out_ep(1);
+
 	if(dev.open(pro->m_dev))
 		return -1;
 
@@ -85,24 +100,21 @@ int SDPSCmd::run(CmdCtx *pro)
 	if (!p)
 		return -1;
 
-	ROM_INFO * rom;
-	rom = search_rom_info(pro->m_config_item);
-	if (rom == NULL)
-	{
-		set_last_err_string("Fail found ROM info");
-		return -1;
-	}
-
 	HIDReport report(&dev);
 	report.m_skip_notify = false;
 
-	if (m_offset >= p->size())
+	size_t offset = m_offset;
+
+	if (m_bskipflashheader)
+		offset += GetFlashHeaderSize(p, offset);
+
+	if (offset >= p->size())
 	{
 		set_last_err_string("Offset bigger than file size");
 		return -1;
 	}
 
-	size_t sz = GetContainerActualSize(p, m_offset);
+	size_t sz = GetContainerActualSize(p, offset);
 
 	if (!(rom->flags & ROM_INFO_HID_NO_CMD))
 	{
@@ -123,7 +135,10 @@ int SDPSCmd::run(CmdCtx *pro)
 			return ret;
 	}
 
-	int ret = report.write(p->data() + m_offset, sz,  2);
+	if (rom->flags & ROM_INFO_HID_PACK_SIZE_1020)
+		report.set_out_package_size(1020);
+
+	int ret = report.write(p->data() + offset, sz,  2);
 
 	if (ret ==  0)
 	{

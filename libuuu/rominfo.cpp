@@ -51,9 +51,10 @@ ROM_INFO g_RomInfo[] =
 	{ "MX7ULP",	 0x2f018000, ROM_INFO_HID | ROM_INFO_HID_MX6 | ROM_INFO_HID_SKIP_DCD },
 	{ "MXRT106X",	 0x1000,     ROM_INFO_HID | ROM_INFO_HID_MX6 | ROM_INFO_HID_SKIP_DCD },
 	{ "MX8QXP",      0x0,        ROM_INFO_HID | ROM_INFO_HID_NO_CMD | ROM_INFO_HID_UID_STRING },
-	{ "MX28",	 0x0,		 ROM_INFO_HID},
-	{ "SPL",	 0x0,	     ROM_INFO_HID | ROM_INFO_HID_MX6 | ROM_INFO_SPL_JUMP },
-	{ "SPL1",	 0x0,	     ROM_INFO_HID | ROM_INFO_HID_MX6 | ROM_INFO_SPL_JUMP | ROM_INFO_AUTO_SCAN_UBOOT_POS},
+	{ "MX28",	 0x0,        ROM_INFO_HID},
+	{ "MX815",       0x0,        ROM_INFO_HID | ROM_INFO_HID_NO_CMD | ROM_INFO_HID_UID_STRING | ROM_INFO_HID_EP1 | ROM_INFO_HID_PACK_SIZE_1020 },
+	{ "SPL",	 0x0,	     ROM_INFO_HID | ROM_INFO_HID_MX6 | ROM_INFO_SPL_JUMP | ROM_INFO_HID_SDP_NO_MAX_PER_TRANS},
+	{ "SPL1",	 0x0,	     ROM_INFO_HID | ROM_INFO_HID_MX6 | ROM_INFO_SPL_JUMP | ROM_INFO_HID_SDP_NO_MAX_PER_TRANS | ROM_INFO_AUTO_SCAN_UBOOT_POS},
 };
 
 ROM_INFO * search_rom_info(const char *s)
@@ -113,30 +114,42 @@ struct rom_bootimg {
 	uint8_t  iv[IV_MAX_LEN];
 };
 
+
+#define IMG_V2X		0x0B
+
 #pragma pack ()
 
-inline uint32_t round_up(uint32_t x, uint32_t align)
-{
-	uint32_t mask = align - 1;
-	return (x + mask) & ~mask;
-}
 
 size_t GetContainerActualSize(shared_ptr<FileBuffer> p, size_t offset)
 {
 	struct rom_container *hdr;
+	int cindex = 1;
 
 	hdr = (struct rom_container *)(p->data() + offset + CONTAINER_HDR_ALIGNMENT);
 	if (hdr->tag != CONTAINER_TAG)
 		return p->size() - offset;
 
 	struct rom_bootimg *image;
+
+	/* Check if include V2X container*/
 	image = (struct rom_bootimg *)(p->data() + offset + CONTAINER_HDR_ALIGNMENT
+		+ sizeof(struct rom_container));
+
+	if ((image->flags & 0xF) == IMG_V2X)
+	{
+		cindex = 2;
+		hdr = (struct rom_container *)(p->data() + offset + cindex * CONTAINER_HDR_ALIGNMENT);
+		if (hdr->tag != CONTAINER_TAG)
+			return p->size() - offset;
+	}
+
+	image = (struct rom_bootimg *)(p->data() + offset + cindex * CONTAINER_HDR_ALIGNMENT
 		+ sizeof(struct rom_container)
 		+ sizeof(struct rom_bootimg) * (hdr->num_images - 1));
 
-	uint32_t sz = image->size + image->offset + CONTAINER_HDR_ALIGNMENT;
+	uint32_t sz = image->size + image->offset + cindex * CONTAINER_HDR_ALIGNMENT;
 
-	sz = round_up(sz, CONTAINER_HDR_ALIGNMENT);
+	sz = round_up(sz, (uint32_t)CONTAINER_HDR_ALIGNMENT);
 
 	if (sz > (p->size() - offset))
 		return p->size() - offset;
@@ -144,4 +157,51 @@ size_t GetContainerActualSize(shared_ptr<FileBuffer> p, size_t offset)
 	hdr = (struct rom_container *)(p->data() + offset + sz);
 
 	return sz;
+}
+static uint32_t FlashHeaderMagic[] =
+{
+	0xc0ffee01,
+	0x42464346,
+	0
+};
+
+bool CheckHeader(uint32_t *p)
+{
+	int i = 0;
+	while(FlashHeaderMagic[i])
+	{
+		if (*p == FlashHeaderMagic[i])
+			return true;
+		i++;
+	}
+	return false;
+}
+
+size_t GetFlashHeaderSize(shared_ptr<FileBuffer> p, size_t offset)
+{
+	if (p->size() < offset)
+		return 0;
+
+	if (CheckHeader((uint32_t*)(p->data() + offset)))
+		return 0x1000;
+
+	if (p->size() < offset + 0x400)
+		return 0;
+
+	if (CheckHeader((uint32_t*)(p->data() + offset + 0x400)))
+		return 0x1000;
+
+	if (p->size() < offset + 0x1fc)
+		return 0;
+
+	if (CheckHeader((uint32_t*)(p->data() + offset + 0x1fc)))
+		return 0x1000;
+
+	if (p->size() < offset + 0x5fc)
+		return 0;
+
+	if (CheckHeader((uint32_t*)(p->data() + offset + 0x5fc)))
+		return 0x1000;
+
+	return 0;
 }

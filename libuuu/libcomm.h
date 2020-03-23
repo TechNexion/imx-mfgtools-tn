@@ -140,3 +140,12 @@ inline bool compare_str(string &str1, string &str2, bool ignore_case)
 	else
 		return str1 == str2;
 }
+
+uint32_t str_to_uint(string &str);
+uint64_t str_to_uint64(string &str);
+
+template <class T>
+inline T round_up(T x, T align)
+{
+	return (x + align - 1) / align * align;
+}

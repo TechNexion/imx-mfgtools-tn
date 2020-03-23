@@ -9,10 +9,15 @@ pkg_check_modules(LIBZIP REQUIRED libzip)
 pkg_check_modules(LIBZ REQUIRED zlib)
 find_package(Threads)
 
+if (STATIC)
+set(OPENSSL_USE_STATIC_LIBS TRUE)
+endif()
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread -O2")
+find_package(OpenSSL)
 
-if (NOT APPLE)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread -O2 -no-pie")
+
+if (STATIC)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -static-libstdc++ -static-libgcc")
 endif()
 
@@ -29,6 +34,7 @@ set(LSTS
 	sd_burn_loader.lst
 	spl_boot.lst
 	sd_burn_all.lst
+	nand_burn_loader.lst
 )
 
 link_directories(${CMAKE_CURRENT_SOURCE_DIR}/libuuu ${LIBUSB_LIBRARY_DIRS} ${LIBZIP_LIBRARY_DIRS} ${LIBZ_LIBRARY_DIRS})
@@ -67,6 +73,6 @@ set(SOURCES
 )
 
 add_executable(uuu ${SOURCES})
-target_link_libraries(uuu uuc_s  ${LIBUSB_LIBRARIES} ${LIBZIP_LIBRARIES} ${LIBZ_LIBRARIES} bz2)
+target_link_libraries(uuu uuc_s ${OPENSSL_LIBRARIES} ${LIBUSB_LIBRARIES} ${LIBZIP_LIBRARIES} ${LIBZ_LIBRARIES} dl bz2)
 
 install(TARGETS uuu DESTINATION bin)

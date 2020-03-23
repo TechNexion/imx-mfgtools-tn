@@ -36,38 +36,56 @@
 #include "liberror.h"
 #include "zip.h"
 
+#define CHUNK 0x10000
+
 int Zip::BuildDirInfo()
 {
-	ifstream stream(m_filename, ifstream::binary);
-
-	if (!stream)
+	shared_ptr<FileBuffer> zipfile = get_file_buffer(m_filename);
+	if (zipfile == NULL)
 	{
-		string err;
-		err = "Failure open file ";
-		err += m_filename;
-		set_last_err_string(m_filename);
 		return -1;
 	}
 
-	stream.seekg(0, ifstream::end);
-	size_t sz = stream.tellg();
-	if (sz < 0x10000)
-		stream.seekg(0, ifstream::beg);
-	else
-		stream.seekg(sz - 0x10000, ifstream::beg);
-
-	vector<uint8_t> buff(0x10000);
-	memset(buff.data(), 0, 0x10000);
-	stream.read((char*)buff.data(), 0x10000);
 	size_t i;
 	Zip_eocd *peocd = NULL;
+	Zip64_eocd_locator *peocd64_loc = NULL;
+	Zip64_eocd *peocd64 = NULL;
 
-	for (i = buff.size() - sizeof(Zip_eocd); i > 0; i--)
+	for (i = zipfile->size() - sizeof(Zip_eocd); i > 0; i--)
 	{
-		peocd = (Zip_eocd*)(buff.data() + i);
+		peocd = (Zip_eocd*)(zipfile->data() + i);
 		if (peocd->sign == EOCD_SIGNATURE)
 		{
+			if (peocd->offset_of_central_dir == 0xFFFFFFFF)
+			{//zip64
+				for (size_t j = i - sizeof(Zip64_eocd_locator); j > 0; j--)
+				{
+					peocd64_loc = (Zip64_eocd_locator*)(zipfile->data() + j);
+					if (peocd64_loc->sign == EOCD64_LOCATOR_SIGNATURE)
+					{
+						peocd64 = (Zip64_eocd*)(zipfile->data() + peocd64_loc->offset_of_eocd);
+						if (peocd64->sign != EOCD64_SIGNATURE)
+						{
+							set_last_err_string("Can't find EOCD64_SIGNATURE, not a zip64 file");
+							return -1;
+						}
+						break;
+					}
+
+					if (zipfile->size() - j > 0x10000)
+					{
+						set_last_err_string("Can't find EOCD, not a zip file");
+						return -1;
+					}
+				}
+			}
 			break;
+		}
+
+		if (zipfile->size() - i > 0x10000)
+		{
+			set_last_err_string("Can't find EOCD, not a zip file");
+			return -1;
 		}
 	}
 
@@ -77,15 +95,13 @@ int Zip::BuildDirInfo()
 		return -1;
 	}
 
-	stream.seekg(peocd->offset_of_central_dir);
-	buff.resize(peocd->size_of_central_dir);
+	i = peocd64? peocd64->offset:peocd->offset_of_central_dir;
+	size_t total = i;
+	total += peocd64 ? peocd64->size: peocd->size_of_central_dir;
 
-	stream.read((char*)buff.data(), peocd->size_of_central_dir);
-
-	i = 0;
-	while (i < buff.size())
+	while (i < total)
 	{
-		Zip_central_dir *pdir = (Zip_central_dir *)(buff.data() + i);
+		Zip_central_dir *pdir = (Zip_central_dir *)(zipfile->data() + i);
 		if (pdir->sign != DIR_SIGNTURE)
 		{
 			set_last_err_string("DIR signature missmatched");
@@ -96,6 +112,59 @@ int Zip::BuildDirInfo()
 		info.m_offset = pdir->offset;
 		info.m_filesize = pdir->uncompressed_size;
 		info.m_timestamp = (pdir->last_modidfy_date << 16) + pdir->last_modidfy_time;
+		info.m_compressedsize = pdir->compressed_size;
+
+		if (pdir->extrafield_length)
+		{
+			size_t e;
+			for (e = 0; e < pdir->extrafield_length; /*dummy*/)
+			{
+				Zip_ext *ext = (Zip_ext*)(zipfile->data() + e + i + sizeof(Zip_central_dir) + pdir->file_name_length);
+
+				if (ext->tag == 0x1)
+				{
+					size_t cur64 = 0;
+					if (info.m_filesize == 0xFFFFFFFF)
+					{
+						info.m_filesize = *((uint64_t*)(((uint8_t*)ext) + sizeof(Zip_ext) + cur64));
+						cur64 += 8;
+					}
+
+					if (cur64 > ext->size)
+					{
+						set_last_err_string("error pass zip64");
+						return -1;
+					}
+
+					if (info.m_compressedsize == 0xFFFFFFFF)
+					{
+						info.m_compressedsize = *((uint64_t*)(((uint8_t*)ext) + sizeof(Zip_ext) + cur64));
+						cur64 += 8;
+					}
+
+					if (cur64 > ext->size)
+					{
+						set_last_err_string("error pass zip64");
+						return -1;
+					}
+
+					if (info.m_offset == 0xFFFFFFFF)
+					{
+						info.m_offset = *((uint64_t*)(((uint8_t*)ext) + sizeof(Zip_ext) + cur64));
+						cur64 += 8;
+					}
+
+					if (cur64 > ext->size)
+					{
+						set_last_err_string("error pass zip64");
+						return -1;
+					}
+
+					break;
+				}
+				e += ext->size + sizeof(Zip_ext);
+			}
+		}
 		i += sizeof(Zip_central_dir) + pdir->extrafield_length + pdir->file_name_length + pdir->file_comment_length;
 		m_filemap[info.m_filename] = info;
 	}
@@ -113,39 +182,43 @@ Zip_file_Info::~Zip_file_Info()
 	memset(&m_strm, 0, sizeof(m_strm));
 }
 
-shared_ptr<FileBuffer>	Zip_file_Info::decompress(Zip *pZip)
+int	Zip_file_Info::decompress(Zip *pZip, shared_ptr<FileBuffer>p)
 {
-	shared_ptr<FileBuffer> p(new FileBuffer);
 	p->resize(m_filesize);
-
+	atomic_fetch_or(&p->m_dataflags, FILEBUFFER_FLAG_KNOWN_SIZE);
+	
 	uuu_notify ut;
 	ut.type = uuu_notify::NOTIFY_DECOMPRESS_SIZE;
 	ut.total = m_filesize;
 	call_notify(ut);
 	size_t lastpos = 0;
 
-	ifstream stream(pZip->m_filename, ifstream::binary);
-	if (!stream)
-	{
-		string err;
-		err += "Failure open file ";
-		err += pZip->m_filename;
-		set_last_err_string(err);
-	}
-	stream.seekg(m_offset, ifstream::beg);
-	Zip_file_desc file_desc;
-	stream.read((char*)&file_desc, sizeof(file_desc));
-	if (file_desc.sign != FILE_SIGNATURE)
+	shared_ptr<FileBuffer> zipfile = get_file_buffer(pZip->m_filename);
+	if (zipfile == NULL)
+		return -1;
+
+	Zip_file_desc *file_desc=(Zip_file_desc *)(zipfile->data() + m_offset);
+	if (file_desc->sign != FILE_SIGNATURE)
 	{
 		set_last_err_string("file signature miss matched");
-		return NULL;
+		return -1;
 	}
 
-	size_t off = sizeof(file_desc) + file_desc.file_name_length + file_desc.extrafield_length;
-	stream.seekg(m_offset + off, ifstream::beg);
+	size_t off = sizeof(Zip_file_desc) + file_desc->file_name_length + file_desc->extrafield_length;
 
-	int CHUNK = 0x10000;
-	vector<uint8_t> source(CHUNK);
+	if (file_desc->compress_method == 0)
+	{
+		p->ref_other_buffer(zipfile, m_offset + off, m_filesize);
+		atomic_fetch_or(&p->m_dataflags, FILEBUFFER_FLAG_LOADED);
+		return 0;
+	}
+
+	if (file_desc->compress_method != 8)
+	{
+		set_last_err_string("Unsupport compress method");
+		return -1;
+	}
+
 	int ret;
 	size_t pos = 0;
 
@@ -153,33 +226,37 @@ shared_ptr<FileBuffer>	Zip_file_Info::decompress(Zip *pZip)
 	inflateInit2(&m_strm, -MAX_WBITS);
 
 	/* decompress until deflate stream ends or end of file */
+	m_strm.avail_in = m_compressedsize;
+	m_strm.next_in = zipfile->data() + m_offset + off;
+	m_strm.total_in = m_compressedsize;
+
+	/* run inflate() on input until output buffer not full */
+	size_t each_out_size = CHUNK;
 	do {
-		stream.read((char*)source.data(), CHUNK);
-		m_strm.avail_in = stream.gcount();
 
-		if (m_strm.avail_in == 0)
-			break;
-		m_strm.next_in = source.data();
+		if (p->size() - pos < each_out_size)
+			each_out_size = p->size() - pos;
 
-		/* run inflate() on input until output buffer not full */
-		do {
-			m_strm.avail_out = CHUNK;
-			m_strm.next_out = &((*p)[pos]);
-			ret = inflate(&m_strm, Z_NO_FLUSH);
-			//assert(ret != Z_STREAM_ERROR);  /* state not clobbered */
-			switch (ret) {
-			case Z_NEED_DICT:
-				ret = Z_DATA_ERROR;     /* and fall through */
-			case Z_DATA_ERROR:
-			case Z_MEM_ERROR:
-				(void)inflateEnd(&m_strm);
-				return NULL;
-			}
-			size_t have = CHUNK - m_strm.avail_out;
-			pos += have;
-		} while (m_strm.avail_out == 0);
+		m_strm.avail_out = each_out_size;
+		m_strm.next_out = p->data() + pos;
+		ret = inflate(&m_strm, Z_NO_FLUSH);
+		//assert(ret != Z_STREAM_ERROR);  /* state not clobbered */
+		switch (ret) {
+		case Z_NEED_DICT:
+			ret = Z_DATA_ERROR;     /* and fall through */
+		case Z_DATA_ERROR:
+		case Z_MEM_ERROR:
+			(void)inflateEnd(&m_strm);
+			return -1;
+		}
+		size_t have = each_out_size - m_strm.avail_out;
 
-		if(pos - lastpos > 100 * 1024 * 1024)
+		p->m_avaible_size = pos;
+		p->m_request_cv.notify_all();
+
+		pos += have;
+
+		if (pos - lastpos > 100 * 1024 * 1024)
 		{
 			uuu_notify ut;
 			ut.type = uuu_notify::NOTIFY_DECOMPRESS_POS;
@@ -187,7 +264,7 @@ shared_ptr<FileBuffer>	Zip_file_Info::decompress(Zip *pZip)
 			call_notify(ut);
 			lastpos = pos;
 		}
-		/* done when inflate() says it's done */
+
 	} while (ret != Z_STREAM_END);
 
 	/* clean up and return */
@@ -196,12 +273,16 @@ shared_ptr<FileBuffer>	Zip_file_Info::decompress(Zip *pZip)
 	if (ret != Z_STREAM_END)
 	{
 		set_last_err_string("decompress error");
-		return NULL;
+		return -1;
 	}
+
+	p->m_avaible_size = m_filesize;
+	atomic_fetch_or(&p->m_dataflags, FILEBUFFER_FLAG_LOADED);
+	p->m_request_cv.notify_all();
 
 	ut.type = uuu_notify::NOTIFY_DECOMPRESS_POS;
 	ut.index = m_filesize;
 	call_notify(ut);
 
-	return p;
+	return 0;
 }
