@@ -101,7 +101,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
     <CustomBuildBeforeTargets>Build</CustomBuildBeforeTargets>
-    <OutDir>$(Platform)\$(Configuration)</OutDir>
+    <OutDir>$(Platform)\$(Configuration)\</OutDir>
     <TargetName>uuu</TargetName>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -116,7 +116,7 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>../libusb/$(Platform)/$(Configuration)/lib/libusb-1.0.lib;$(Platform)/$(Configuration)/libuuu.lib;$(Platform)/$(Configuration)/zlib.lib;%(AdditionalDependencies);$(Platform)/$(Configuration)/bzip2.lib</AdditionalDependencies>
+      <AdditionalDependencies>$(SolutionDir)../$(Platform)/$(Configuration)/lib/libusb-1.0.lib;$(SolutionDir)$(Platform)/$(Configuration)/libuuu.lib;$(SolutionDir)$(Platform)/$(Configuration)/zlib.lib;%(AdditionalDependencies);$(SolutionDir)$(Platform)/$(Configuration)/bzip2.lib</AdditionalDependencies>
     </Link>
     <PreBuildEvent>
       <Command>echo R^"####( &gt; $(SolutionDir)\..\uuu\uuu.clst
@@ -176,7 +176,7 @@ echo )####^" &gt;&gt; $(SolutionDir)\..\uuu\nand_burn_loader.clst
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>../libusb/$(Platform)/$(Configuration)/lib/libusb-1.0.lib;$(Platform)/$(Configuration)/libuuu.lib;$(Platform)/$(Configuration)/zlib.lib;%(AdditionalDependencies);$(Platform)/$(Configuration)/bzip2.lib</AdditionalDependencies>
+      <AdditionalDependencies>$(SolutionDir)../$(Platform)/$(Configuration)/lib/libusb-1.0.lib;$(SolutionDir)$(Platform)/$(Configuration)/libuuu.lib;$(SolutionDir)$(Platform)/$(Configuration)/zlib.lib;%(AdditionalDependencies);$(SolutionDir)$(Platform)/$(Configuration)/bzip2.lib</AdditionalDependencies>
     </Link>
     <PreBuildEvent>
       <Command>echo R^"####( &gt; $(SolutionDir)\..\uuu\uuu.clst
@@ -241,7 +241,7 @@ echo )####^" &gt;&gt; $(SolutionDir)\..\uuu\nand_burn_loader.clst
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>../libusb/$(Platform)/$(Configuration)/lib/libusb-1.0.lib;$(Platform)/$(Configuration)/libuuu.lib;$(Platform)/$(Configuration)/zlib.lib;%(AdditionalDependencies);$(Platform)/$(Configuration)/bzip2.lib</AdditionalDependencies>
+      <AdditionalDependencies>$(SolutionDir)../$(Platform)/$(Configuration)/lib/libusb-1.0.lib;$(SolutionDir)$(Platform)/$(Configuration)/libuuu.lib;$(SolutionDir)$(Platform)/$(Configuration)/zlib.lib;%(AdditionalDependencies);$(SolutionDir)$(Platform)/$(Configuration)/bzip2.lib</AdditionalDependencies>
     </Link>
     <PreBuildEvent>
       <Command>echo R^"####( &gt; $(SolutionDir)\..\uuu\uuu.clst
@@ -306,7 +306,7 @@ echo )####^" &gt;&gt; $(SolutionDir)\..\uuu\nand_burn_loader.clst
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>../libusb/$(Platform)/$(Configuration)/lib/libusb-1.0.lib;$(Platform)/$(Configuration)/libuuu.lib;$(Platform)/$(Configuration)/zlib.lib;%(AdditionalDependencies);$(Platform)/$(Configuration)/bzip2.lib</AdditionalDependencies>
+      <AdditionalDependencies>$(SolutionDir)../$(Platform)/$(Configuration)/lib/libusb-1.0.lib;$(SolutionDir)$(Platform)/$(Configuration)/libuuu.lib;$(SolutionDir)$(Platform)/$(Configuration)/zlib.lib;%(AdditionalDependencies);$(SolutionDir)$(Platform)/$(Configuration)/bzip2.lib</AdditionalDependencies>
     </Link>
     <PreBuildEvent>
       <Command>echo R^"####( &gt; $(SolutionDir)\..\uuu\uuu.clst
