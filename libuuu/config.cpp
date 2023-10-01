@@ -67,6 +67,7 @@ Config::Config()
 	emplace_back(ConfigItem{"SDP:", "MX8MQ",   "MX8MQ", NXP_VID, 0x012B});
 	emplace_back(ConfigItem{"SDPU:", "SPL",    "SPL",  0x0525, 0xB4A4, 0,      0x04FF});
 	emplace_back(ConfigItem{"SDPV:", "SPL1",   "SPL",  0x0525, 0xB4A4, 0x0500, 0x9998});
+	emplace_back(ConfigItem("SDPV:", "SPL1",   "SPL",  0x0525, 0x0151, 0x0500, 0x9998));
 	emplace_back(ConfigItem{"SDPU:", "SPL",    "SPL",  0x0525, 0xB4A4, 0x9999, 0x9999}); /*old i.MX8 MQEVk use bcd 9999*/
 	emplace_back(ConfigItem{"SDPU:", "SPL",    "SPL",  BD_VID, 0x1001, 0,      0x04FF});
 	emplace_back(ConfigItem{"SDPV:", "SPL1",   "SPL",  BD_VID, 0x1001, 0x0500, 0x9998});

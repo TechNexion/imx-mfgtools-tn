@@ -9,7 +9,7 @@ SDP: boot -f _SPL
 # {
 SDPV: delay 1000
 SDPV: write -f  _UBOOT -addr 0x877FFFC0
-SDPV: jump -addr 0x87800000
+SDPV: jump -addr 0x877FFFC0
 # }
 FB: ucmd setenv fastboot_dev mmc
 FB: ucmd setenv mmcdev ${mmc_dev}
