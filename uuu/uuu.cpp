@@ -30,6 +30,7 @@
 */
 
 #include <iostream>
+#include <algorithm>
 #include <stdio.h>
 #include <thread>
 #include <atomic>
